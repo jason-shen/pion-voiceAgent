@@ -11,6 +11,26 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 - **Room-based** — Join named rooms; each room maintains its own conversation context
 - **Open source** — Apache 2.0 licensed, Go + Next.js stack
 
+## In Function Now
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| WebRTC audio (Pion) | ✅ | Opus RTP bidirectional streaming |
+| WebSocket signaling | ✅ | SDP offer/answer, ICE candidates |
+| Room management | ✅ | Create/join rooms, goroutine per room |
+| Deepgram STT | ✅ | Streaming WebSocket, Nova-2, endpointing |
+| OpenAI LLM | ✅ | GPT-4o-mini, streaming, conversation history |
+| Cartesia TTS | ✅ | Sonic-3, Katie voice, pcm_s16le |
+| Deepgram TTS | ✅ | Aura Asteria, switchable via env |
+| Next.js client | ✅ | Room join, live transcript, audio visualizer |
+| ICE candidate buffering | ✅ | Handles out-of-order signaling |
+
+## TODO
+
+- [ ] **Tool calling** — LLM function/tool execution (APIs, actions)
+- [ ] **RAG** — Retrieval-augmented generation (documents, knowledge base)
+- [ ] **Memory** — Persistent conversation memory across sessions
+
 ## Architecture
 
 ```
@@ -128,6 +148,10 @@ voiceagent/
 ## Scaling
 
 The room manager is in-memory (single process). For horizontal scaling, add a Redis-backed room manager with pub/sub for cross-instance signaling.
+
+## Contributing
+
+Contributions welcome. See [TODO](#todo) for planned features.
 
 ## License
 
