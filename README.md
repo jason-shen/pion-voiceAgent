@@ -1,121 +1,134 @@
 # Voice Agent
 
-A real-time AI voice agent using WebRTC. Users connect to a room through a browser, speak naturally, and an AI agent listens (STT), thinks (LLM), and responds with speech (TTS) -- all streamed over WebRTC.
+A real-time AI voice agent built with WebRTC. Speak naturally in your browser—the agent transcribes your speech, runs it through an LLM, and speaks back with low-latency TTS, all over a peer-to-peer audio connection.
+
+## Features
+
+- **Real-time voice conversation** — WebRTC audio streaming with sub-100ms round-trip
+- **Configurable TTS** — [Cartesia Sonic](https://cartesia.ai/sonic) (default) or [Deepgram Aura](https://deepgram.com) for text-to-speech
+- **Streaming STT** — [Deepgram](https://deepgram.com) real-time transcription with built-in VAD
+- **LLM-powered** — [OpenAI GPT-4o-mini](https://platform.openai.com) with conversation history
+- **Room-based** — Join named rooms; each room maintains its own conversation context
+- **Open source** — Apache 2.0 licensed, Go + Next.js stack
 
 ## Architecture
 
 ```
-Browser (Next.js)  <-- WebRTC -->  Go Server (Pion)
-                   <-- WebSocket (signaling) -->
+┌─────────────────────┐                    ┌─────────────────────────────────────┐
+│   Next.js Client    │                    │           Go Server (Pion)           │
+│                     │                    │                                       │
+│  Mic → WebRTC ──────┼──── Opus RTP ──────┼──→ Opus Decode → Deepgram STT        │
+│  Speaker ← WebRTC ←─┼──── Opus RTP ←─────┼──← Opus Encode ← TTS (Cartesia/DG)    │
+│                     │                    │         │                            │
+│  WebSocket ◄───────►│◄──────────────────►│  OpenAI GPT (streaming)               │
+│  (signaling)        │                    │         │                            │
+└─────────────────────┘                    └─────────────────────────────────────┘
 ```
 
-**Audio pipeline on the server:**
-
-1. Receive Opus audio from client via WebRTC
-2. Decode Opus to PCM, stream to Deepgram STT (real-time WebSocket)
-3. On final transcript, send to OpenAI GPT (streaming)
-4. Stream LLM response sentences to TTS (Cartesia Sonic or Deepgram)
-5. Encode TTS audio to Opus, send back via WebRTC
+**Pipeline flow:** Browser captures mic → Opus over WebRTC → Server decodes to PCM → Deepgram STT → OpenAI LLM → Cartesia/Deepgram TTS → Opus over WebRTC → Browser plays audio.
 
 ## Prerequisites
 
-- **Go 1.22+** with CGO enabled (required for Opus codec via `libopus`)
+- **Go 1.22+** (CGO enabled for Opus)
 - **Node.js 18+** and npm
-- **libopus** development headers:
-  - macOS: `brew install opus`
-  - Ubuntu/Debian: `apt install libopus-dev`
-- **Deepgram API key** -- [deepgram.com](https://deepgram.com) (required for STT)
-- **OpenAI API key** -- [platform.openai.com](https://platform.openai.com)
-- **Cartesia API key** (optional) -- [cartesia.ai](https://cartesia.ai) for TTS (default)
+- **libopus** — `brew install opus` (macOS) or `apt install libopus-dev` (Ubuntu/Debian)
+- **API keys:**
+  - [Deepgram](https://deepgram.com) — required for STT
+  - [OpenAI](https://platform.openai.com) — required for LLM
+  - [Cartesia](https://cartesia.ai) — for TTS (default), or use Deepgram for TTS
 
-## Setup
+## Quick Start
 
-### Server
+**1. Clone and configure the server**
 
 ```bash
 cd server
 cp .env.example .env
 # Edit .env with your API keys
+```
 
+**2. Start the server**
+
+```bash
 go run main.go
 ```
 
-The server starts on port 8080 by default.
-
-### Client
+**3. Start the client**
 
 ```bash
 cd client
 cp .env.local.example .env.local
-# Edit if the server runs on a different host/port
-
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), enter a room name, and click Connect.
+**4. Open [http://localhost:3000](http://localhost:3000)** — enter a room name and click Connect.
 
-## Environment Variables
+## Configuration
 
 ### Server (`server/.env`)
 
 | Variable | Required | Default | Description |
-|---|---|---|---|
-| `DEEPGRAM_API_KEY` | Yes | -- | Deepgram API key (required for STT) |
-| `OPENAI_API_KEY` | Yes | -- | OpenAI API key for LLM |
-| `TTS_PROVIDER` | No | `cartesia` | TTS provider: `cartesia` or `deepgram` |
-| `CARTESIA_API_KEY` | If cartesia | -- | Cartesia API key for TTS ([cartesia.ai](https://cartesia.ai)) |
-| `CARTESIA_VOICE_ID` | No | Katie | Cartesia voice ID |
-| `PORT` | No | `8080` | HTTP/WebSocket server port |
-| `SYSTEM_PROMPT` | No | (helpful assistant) | System prompt for the AI agent |
+|----------|----------|---------|--------------|
+| `DEEPGRAM_API_KEY` | Yes | — | Deepgram API key (STT) |
+| `OPENAI_API_KEY` | Yes | — | OpenAI API key (LLM) |
+| `TTS_PROVIDER` | No | `cartesia` | `cartesia` or `deepgram` |
+| `CARTESIA_API_KEY` | If Cartesia | — | [Cartesia](https://cartesia.ai) API key |
+| `CARTESIA_VOICE_ID` | No | Katie | Voice ID (see [Cartesia docs](https://docs.cartesia.ai)) |
+| `PORT` | No | `8080` | HTTP/WebSocket port |
+| `SYSTEM_PROMPT` | No | (helpful assistant) | System prompt for the agent |
 
 ### Client (`client/.env.local`)
 
 | Variable | Required | Default | Description |
-|---|---|---|---|
-| `NEXT_PUBLIC_SIGNALING_URL` | No | `ws://localhost:8080/ws` | WebSocket signaling endpoint |
+|----------|----------|---------|--------------|
+| `NEXT_PUBLIC_SIGNALING_URL` | No | `ws://localhost:8080/ws` | WebSocket signaling URL |
 
 ## Signaling Protocol
 
-All signaling happens over a single WebSocket connection at `/ws`:
+WebSocket messages at `/ws`:
 
 | Direction | Type | Payload |
-|---|---|---|
-| Client -> Server | `join` | `{ room: string }` |
-| Server -> Client | `joined` | `{ peer_id: string }` |
-| Client -> Server | `offer` | `{ sdp: string }` |
-| Server -> Client | `answer` | `{ sdp: string }` |
-| Bidirectional | `candidate` | `{ candidate: RTCIceCandidateInit }` |
-| Server -> Client | `transcript` | `{ text: string, final: boolean }` |
-| Server -> Client | `response` | `{ text: string }` |
+|-----------|------|---------|
+| Client → Server | `join` | `{ room: string }` |
+| Server → Client | `joined` | `{ peer_id: string }` |
+| Client → Server | `offer` | `{ sdp: string }` |
+| Server → Client | `answer` | `{ sdp: string }` |
+| Both | `candidate` | `{ candidate: RTCIceCandidateInit }` |
+| Server → Client | `transcript` | `{ text: string, final: boolean }` |
+| Server → Client | `response` | `{ text: string }` |
 
 ## Project Structure
 
 ```
-server/
-  main.go                      Entry point
-  internal/
-    config/config.go           Environment-based config
-    signaling/handler.go       WebSocket signaling
-    room/manager.go            Room lifecycle management
-    room/room.go               Per-room peer coordination
-    peer/peer.go               Pion WebRTC peer wrapper
-    pipeline/pipeline.go       STT -> LLM -> TTS orchestration
-    stt/deepgram.go            Deepgram streaming STT
-    llm/openai.go              OpenAI chat completions
-    tts/deepgram.go            Deepgram TTS
-    audio/opus.go              Opus encode/decode
-    audio/rtp.go               PCM byte conversion
-
-client/
-  src/
-    app/page.tsx               Main page
-    components/VoiceAgent.tsx   Voice agent UI
-    components/AudioVisualizer.tsx  Audio level bars
-    hooks/useVoiceAgent.ts     WebRTC + signaling hook
-    lib/signaling.ts           WebSocket signaling client
+voiceagent/
+├── server/                 # Go backend
+│   ├── main.go
+│   └── internal/
+│       ├── config/         # Env config
+│       ├── signaling/      # WebSocket SDP/ICE exchange
+│       ├── room/           # Room manager, per-room peers
+│       ├── peer/           # Pion WebRTC peer
+│       ├── pipeline/       # STT → LLM → TTS orchestration
+│       ├── stt/            # Deepgram streaming STT
+│       ├── llm/            # OpenAI chat completions
+│       ├── tts/            # Cartesia + Deepgram TTS
+│       └── audio/          # Opus encode/decode, PCM
+│
+├── client/                 # Next.js frontend
+│   └── src/
+│       ├── app/            # layout, page
+│       ├── components/     # VoiceAgent, AudioVisualizer
+│       ├── hooks/          # useVoiceAgent
+│       └── lib/            # SignalingClient
+│
+└── README.md
 ```
 
-## Multi-Instance
+## Scaling
 
-The room manager currently runs in-memory (single process). To scale horizontally, replace the in-memory room manager with a Redis-backed implementation using pub/sub for cross-instance signaling. The `room.Manager` interface is designed for this swap.
+The room manager is in-memory (single process). For horizontal scaling, add a Redis-backed room manager with pub/sub for cross-instance signaling.
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
