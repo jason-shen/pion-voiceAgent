@@ -49,15 +49,44 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 
 ## Prerequisites
 
+**For Docker:** Docker and Docker Compose
+
+**For local development:**
 - **Go 1.22+** (CGO enabled for Opus)
 - **Node.js 18+** and npm
 - **libopus** — `brew install opus` (macOS) or `apt install libopus-dev` (Ubuntu/Debian)
-- **API keys:**
+
+**API keys (required):**
   - [Deepgram](https://deepgram.com) — required for STT
   - [OpenAI](https://platform.openai.com) — required for LLM
   - [Cartesia](https://cartesia.ai) — for TTS (default), or use Deepgram for TTS
 
 ## Quick Start
+
+### Option A: Docker Compose (recommended)
+
+**1. Configure the server**
+
+```bash
+cp server/.env.example server/.env
+# Edit server/.env with your API keys
+```
+
+**2. Build and run**
+
+```bash
+docker compose up --build
+```
+
+**3. Open [http://localhost:3000](http://localhost:3000)** — enter a room name and click Connect.
+
+> **Note:** The client connects to `ws://localhost:8080/ws` by default. If you access the app via a different host (e.g. `http://192.168.1.x:3000`), rebuild the client with:
+> ```bash
+> docker compose build --build-arg NEXT_PUBLIC_SIGNALING_URL=ws://YOUR_HOST:8080/ws client
+> docker compose up
+> ```
+
+### Option B: Local development
 
 **1. Clone and configure the server**
 
@@ -118,11 +147,23 @@ WebSocket messages at `/ws`:
 | Server → Client | `transcript` | `{ text: string, final: boolean }` |
 | Server → Client | `response` | `{ text: string }` |
 
+## Docker
+
+| File | Purpose |
+|------|---------|
+| `server/Dockerfile` | Multi-stage Go build with libopus (CGO) |
+| `client/Dockerfile` | Multi-stage Next.js build |
+| `docker-compose.yml` | Orchestrates server + client |
+
+The server reads env vars from `server/.env`. Create it from `server/.env.example` before running `docker compose up`.
+
 ## Project Structure
 
 ```
 voiceagent/
+├── docker-compose.yml
 ├── server/                 # Go backend
+│   ├── Dockerfile
 │   ├── main.go
 │   └── internal/
 │       ├── config/         # Env config
@@ -136,6 +177,7 @@ voiceagent/
 │       └── audio/          # Opus encode/decode, PCM
 │
 ├── client/                 # Next.js frontend
+│   ├── Dockerfile
 │   └── src/
 │       ├── app/            # layout, page
 │       ├── components/     # VoiceAgent, AudioVisualizer

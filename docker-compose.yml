@@ -1,0 +1,22 @@
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./server/.env
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SIGNALING_URL: "ws://localhost:8080/ws"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    restart: unless-stopped
