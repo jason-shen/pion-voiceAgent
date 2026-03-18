@@ -1,7 +1,7 @@
 package audio
 
 import (
-	"gopkg.in/hraban/opus.v2"
+	"github.com/godeps/opus"
 )
 
 const (

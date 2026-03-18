@@ -55,9 +55,8 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 **For Docker:** Docker and Docker Compose
 
 **For local development:**
-- **Go 1.22+** (CGO enabled for Opus)
+- **Go 1.22+**
 - **Node.js 18+** and npm
-- **libopus** — `brew install opus` (macOS) or `apt install libopus-dev` (Ubuntu/Debian)
 
 **API keys (required):**
   - [Deepgram](https://deepgram.com) — required for STT
@@ -177,7 +176,7 @@ This implementation follows and aligns with [RFC 9725](https://www.rfc-editor.or
 
 | File | Purpose |
 |------|---------|
-| `server/Dockerfile` | Multi-stage Go build with libopus (CGO) |
+| `server/Dockerfile` | Multi-stage Go build (pure Go, no CGO) |
 | `client/Dockerfile` | Multi-stage Next.js build |
 | `docker-compose.yml` | Orchestrates server + client |
 
