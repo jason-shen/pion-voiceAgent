@@ -33,6 +33,7 @@ func main() {
 	rm := room.NewManager(cfg)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/whip", signaling.NewWHIPHandler(rm))
 	mux.HandleFunc("/whip/", signaling.NewWHIPHandler(rm))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

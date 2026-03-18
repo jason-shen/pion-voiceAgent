@@ -66,7 +66,7 @@ func (r *Room) AddPeer(peerID string) (*peer.Peer, error) {
 
 	go func() {
 		if err := pl.Start(); err != nil {
-			log.Printf("[room:%s] pipeline error for peer %s: %v", r.ID, peerID, err)
+			log.Printf("[session:%s] pipeline error for peer %s: %v", r.ID, peerID, err)
 		}
 	}()
 
@@ -83,7 +83,7 @@ func (r *Room) removePeer(peerID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.peers, peerID)
-	log.Printf("[room:%s] peer %s removed, %d peers remaining", r.ID, peerID, len(r.peers))
+	log.Printf("[session:%s] peer %s removed, %d peers remaining", r.ID, peerID, len(r.peers))
 }
 
 func (r *Room) PeerCount() int {
@@ -100,5 +100,5 @@ func (r *Room) Close() {
 		p.Close()
 	}
 	r.peers = make(map[string]*peer.Peer)
-	log.Printf("[room:%s] closed", r.ID)
+	log.Printf("[session:%s] closed", r.ID)
 }

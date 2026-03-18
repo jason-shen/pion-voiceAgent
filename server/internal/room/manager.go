@@ -30,7 +30,7 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 
 	r := NewRoom(roomID, m.cfg)
 	m.rooms[roomID] = r
-	log.Printf("[manager] created room %s", roomID)
+	log.Printf("[manager] created session %s", roomID)
 	return r
 }
 
@@ -46,7 +46,7 @@ func (m *Manager) Remove(roomID string) {
 	if r, ok := m.rooms[roomID]; ok {
 		r.Close()
 		delete(m.rooms, roomID)
-		log.Printf("[manager] removed room %s", roomID)
+		log.Printf("[manager] removed session %s", roomID)
 	}
 }
 
@@ -57,5 +57,5 @@ func (m *Manager) CloseAll() {
 		r.Close()
 		delete(m.rooms, id)
 	}
-	log.Println("[manager] all rooms closed")
+	log.Println("[manager] all sessions closed")
 }
