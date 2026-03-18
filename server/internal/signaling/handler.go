@@ -13,15 +13,14 @@ import (
 // NewWHIPHandler returns an HTTP handler implementing WHIP signaling per
 // RFC 9725. It handles two URL patterns:
 //
-//	POST   /whip/{room}            – Ingest session setup (SDP offer/answer)
-//	DELETE /whip/{room}/{peerID}   – Session teardown
+//	POST   /whip                   – Session setup (SDP offer/answer), returns sessionId
+//	DELETE /whip/{sessionId}       – Session teardown
 //	OPTIONS (any)                  – CORS preflight
 func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Parse path segments: /whip/{room} or /whip/{room}/{peerID}
-		trimmed := strings.TrimPrefix(r.URL.Path, "/whip/")
-		parts := strings.SplitN(trimmed, "/", 2)
-		roomName := parts[0]
+		// Parse path segment: /whip or /whip/{sessionId}
+		trimmed := strings.TrimPrefix(r.URL.Path, "/whip")
+		trimmed = strings.TrimPrefix(trimmed, "/")
 
 		switch r.Method {
 		case http.MethodOptions:
@@ -30,14 +29,14 @@ func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 
 		case http.MethodPost:
-			handleWHIPPost(w, r, rm, roomName)
+			handleWHIPPost(w, r, rm)
 
 		case http.MethodDelete:
-			if len(parts) < 2 || parts[1] == "" {
-				http.Error(w, "session URL required: /whip/{room}/{peerID}", http.StatusBadRequest)
+			if trimmed == "" {
+				http.Error(w, "session URL required: /whip/{sessionId}", http.StatusBadRequest)
 				return
 			}
-			handleWHIPDelete(w, rm, roomName, parts[1])
+			handleWHIPDelete(w, rm, trimmed)
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,12 +45,8 @@ func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
 }
 
 // handleWHIPPost implements RFC 9725 §4.2 Ingest Session Setup.
-func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager, roomName string) {
-	if roomName == "" {
-		http.Error(w, "room name required in path: /whip/{room}", http.StatusBadRequest)
-		return
-	}
-
+// A new sessionId (UUID) is generated for each POST.
+func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager) {
 	// RFC 9725 §4.2: MUST have content type application/sdp.
 	ct := r.Header.Get("Content-Type")
 	if ct != "" && !strings.HasPrefix(ct, "application/sdp") {
@@ -70,11 +65,12 @@ func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager, ro
 		return
 	}
 
-	peerID := uuid.New().String()
-	log.Printf("[whip] peer %s joining room %s", peerID, roomName)
+	sessionID := uuid.New().String()
+	peerID := sessionID
+	log.Printf("[whip] creating session %s", sessionID)
 
-	currentRoom := rm.GetOrCreate(roomName)
-	p, err := currentRoom.AddPeer(peerID)
+	session := rm.GetOrCreate(sessionID)
+	p, err := session.AddPeer(peerID)
 	if err != nil {
 		log.Printf("[whip] add peer error: %v", err)
 		http.Error(w, "failed to create peer", http.StatusInternalServerError)
@@ -89,32 +85,27 @@ func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager, ro
 		return
 	}
 
-	log.Printf("[whip] peer %s connected to room %s", peerID, roomName)
+	log.Printf("[whip] session %s connected", sessionID)
 
-	sessionURL := "/whip/" + roomName + "/" + peerID
+	sessionURL := "/whip/" + sessionID
 
 	// RFC 9725 §4.2: 201 Created, application/sdp body, Location header.
 	// RFC 9725 §4.3.1: ETag identifying the ICE session.
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", sessionURL)
-	w.Header().Set("ETag", `"`+peerID+`"`)
+	w.Header().Set("ETag", `"`+sessionID+`"`)
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(answerSDP))
 }
 
 // handleWHIPDelete implements RFC 9725 §4.2 session teardown.
-func handleWHIPDelete(w http.ResponseWriter, rm *room.Manager, roomName, peerID string) {
-	log.Printf("[whip] DELETE session %s/%s", roomName, peerID)
+func handleWHIPDelete(w http.ResponseWriter, rm *room.Manager, sessionID string) {
+	log.Printf("[whip] DELETE session %s", sessionID)
 
-	// Idempotent: return 200 even if the peer was already cleaned up by the
-	// server (e.g. WebRTC connection state changed to disconnected before
-	// the client's DELETE arrived).
-	r := rm.Get(roomName)
-	if r != nil {
-		if p := r.GetPeer(peerID); p != nil {
-			p.Close()
-		}
-	}
+	// Idempotent: return 200 even if the session was already cleaned up by
+	// the server (e.g. WebRTC connection state changed to disconnected
+	// before the client's DELETE arrived).
+	rm.Remove(sessionID)
 
 	w.WriteHeader(http.StatusOK)
 }

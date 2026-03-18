@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+
 import {
   useVoiceAgent,
   type ConnectionStatus,
@@ -59,7 +59,6 @@ function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
 }
 
 export function VoiceAgent() {
-  const [room, setRoom] = useState("");
   const {
     status,
     transcript,
@@ -72,17 +71,6 @@ export function VoiceAgent() {
 
   const isActive = status === "connected";
   const canConnect = status === "idle" || status === "disconnected" || status === "error";
-
-  const handleConnect = () => {
-    if (!room.trim()) return;
-    connect(room.trim());
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && canConnect) {
-      handleConnect();
-    }
-  };
 
   return (
     <div className="w-full max-w-lg mx-auto">
@@ -146,26 +134,15 @@ export function VoiceAgent() {
           <AudioVisualizer level={audioLevel} active={isActive && !isMuted} />
         </div>
 
-        {/* Room Input / Connect */}
+        {/* Connect */}
         {canConnect && (
           <div className="px-6 py-5 border-b border-[var(--card-border)]">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={room}
-                onChange={(e) => setRoom(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter room name..."
-                className="flex-1 bg-zinc-900/60 border border-zinc-700/50 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/40 transition-all"
-              />
-              <button
-                onClick={handleConnect}
-                disabled={!room.trim()}
-                className="px-5 py-2.5 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
-                Connect
-              </button>
-            </div>
+            <button
+              onClick={() => connect()}
+              className="w-full px-5 py-2.5 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 transition-all"
+            >
+              Connect
+            </button>
           </div>
         )}
 

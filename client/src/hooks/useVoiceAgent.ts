@@ -21,7 +21,7 @@ export interface UseVoiceAgentReturn {
   transcript: TranscriptEntry[];
   audioLevel: number;
   isMuted: boolean;
-  connect: (room: string) => Promise<void>;
+  connect: () => Promise<void>;
   disconnect: () => void;
   toggleMute: () => void;
 }
@@ -139,7 +139,7 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
   );
 
   const connect = useCallback(
-    async (room: string) => {
+    async () => {
       try {
         setStatus("connecting");
         setTranscript([]);
@@ -227,7 +227,6 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
 
         // WHIP exchange: POST offer SDP, receive answer SDP + session URL.
         const { answerSDP, sessionURL } = await whipOffer(
-          room,
           pc.localDescription!.sdp
         );
         sessionURLRef.current = sessionURL;

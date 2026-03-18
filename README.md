@@ -8,7 +8,7 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 - **Configurable TTS** — [Cartesia Sonic](https://cartesia.ai/sonic) (default) or [Deepgram Aura](https://deepgram.com) for text-to-speech
 - **Streaming STT** — [Deepgram](https://deepgram.com) real-time transcription with built-in VAD
 - **LLM-powered** — [OpenAI GPT-4o-mini](https://platform.openai.com) with conversation history
-- **Room-based** — Join named rooms; each room maintains its own conversation context
+- **Session-based** — Each connection gets a unique session ID (UUID); no shared rooms
 - **Open source** — Apache 2.0 licensed, Go + Next.js stack
 
 ## In Function Now
@@ -18,12 +18,12 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 | WebRTC audio (Pion) | ✅ | Opus RTP bidirectional streaming |
 | WHIP signaling | ✅ | Single HTTP POST, full ICE gathering |
 | DataChannel events | ✅ | Transcript & response messages over DC |
-| Room management | ✅ | Create/join rooms, goroutine per room |
+| Session management | ✅ | Auto-generated UUID per session |
 | Deepgram STT | ✅ | Streaming WebSocket, Nova-2, endpointing |
 | OpenAI LLM | ✅ | GPT-4o-mini, streaming, conversation history |
 | Cartesia TTS | ✅ | Sonic-3, Katie voice, pcm_s16le |
 | Deepgram TTS | ✅ | Aura Asteria, switchable via env |
-| Next.js client | ✅ | Room join, live transcript, audio visualizer |
+| Next.js client | ✅ | One-click connect, live transcript, audio visualizer |
 
 ## TODO
 
@@ -46,7 +46,7 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 └─────────────────────┘                    └─────────────────────────────────────┘
 ```
 
-**Signaling:** Client creates a DataChannel + SDP offer (with all ICE candidates gathered), POSTs it to `/whip/{room}`, and receives the SDP answer. No persistent signaling connection needed.
+**Signaling:** Client creates a DataChannel + SDP offer (with all ICE candidates gathered), POSTs it to `/whip`, and receives the SDP answer with a server-generated session ID (UUID). No persistent signaling connection needed.
 
 **Pipeline flow:** Browser captures mic → Opus over WebRTC → Server decodes to PCM → Deepgram STT → OpenAI LLM → Cartesia/Deepgram TTS → Opus over WebRTC → Browser plays audio. Transcript and response text are delivered back to the client via a WebRTC DataChannel.
 
@@ -80,7 +80,7 @@ cp server/.env.example server/.env
 docker compose up --build
 ```
 
-**3. Open [http://localhost:3000](http://localhost:3000)** — enter a room name and click Connect.
+**3. Open [http://localhost:3000](http://localhost:3000)** — click Connect.
 
 > **Note:** The client connects to `http://localhost:8080/whip` by default. If you access the app via a different host (e.g. `http://192.168.1.x:3000`), rebuild the client with:
 > ```bash
@@ -113,7 +113,7 @@ npm install
 npm run dev
 ```
 
-**4. Open [http://localhost:3000](http://localhost:3000)** — enter a room name and click Connect.
+**4. Open [http://localhost:3000](http://localhost:3000)** — click Connect.
 
 ## Configuration
 
@@ -143,8 +143,8 @@ Signaling follows [RFC 9725](https://www.rfc-editor.org/rfc/rfc9725.html) (WebRT
 
 | Step | Method | Path | Body | Response |
 |------|--------|------|------|----------|
-| 1 | `POST` | `/whip/{room}` | SDP offer (`application/sdp`) | `201 Created` with SDP answer, `Location` header, `ETag` header |
-| 2 | `DELETE` | `/whip/{room}/{peerID}` | — | `200 OK` (session terminated) |
+| 1 | `POST` | `/whip` | SDP offer (`application/sdp`) | `201 Created` with SDP answer, `Location: /whip/{sessionId}`, `ETag` header |
+| 2 | `DELETE` | `/whip/{sessionId}` | — | `200 OK` (session terminated) |
 | — | `OPTIONS` | `/whip/*` | — | `204` with `Accept-Post: application/sdp` |
 
 The client gathers all ICE candidates before sending the offer. The server gathers all ICE candidates before returning the answer. No trickle ICE.
@@ -193,7 +193,7 @@ voiceagent/
 │   └── internal/
 │       ├── config/         # Env config
 │       ├── signaling/      # WHIP HTTP signaling
-│       ├── room/           # Room manager, per-room peers
+│       ├── room/           # Session manager, per-session peers
 │       ├── peer/           # Pion WebRTC peer
 │       ├── pipeline/       # STT → LLM → TTS orchestration
 │       ├── stt/            # Deepgram streaming STT
@@ -214,7 +214,7 @@ voiceagent/
 
 ## Scaling
 
-The room manager is in-memory (single process). For horizontal scaling, add a Redis-backed room manager with pub/sub for cross-instance signaling.
+The session manager is in-memory (single process). For horizontal scaling, add a Redis-backed session manager with pub/sub for cross-instance signaling.
 
 ## Contributing
 

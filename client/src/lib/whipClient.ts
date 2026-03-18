@@ -9,12 +9,12 @@ export interface WHIPResult {
 /**
  * Perform a WHIP signaling exchange per RFC 9725 §4.2:
  * POST an SDP offer, receive a 201 Created with SDP answer and Location header.
+ * The server generates a unique sessionId (UUID) for each new session.
  */
 export async function whipOffer(
-  room: string,
   offerSDP: string
 ): Promise<WHIPResult> {
-  const url = `${WHIP_BASE_URL}/${encodeURIComponent(room)}`;
+  const url = WHIP_BASE_URL;
 
   const res = await fetch(url, {
     method: "POST",
