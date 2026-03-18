@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/voiceagent/server/internal/room"
+	"github.com/voiceagent/server/internal/session"
 )
 
 // NewWHIPHandler returns an HTTP handler implementing WHIP signaling per
@@ -16,7 +16,7 @@ import (
 //	POST   /whip                   – Session setup (SDP offer/answer), returns sessionId
 //	DELETE /whip/{sessionId}       – Session teardown
 //	OPTIONS (any)                  – CORS preflight
-func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
+func NewWHIPHandler(sm *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse path segment: /whip or /whip/{sessionId}
 		trimmed := strings.TrimPrefix(r.URL.Path, "/whip")
@@ -29,14 +29,14 @@ func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 
 		case http.MethodPost:
-			handleWHIPPost(w, r, rm)
+			handleWHIPPost(w, r, sm)
 
 		case http.MethodDelete:
 			if trimmed == "" {
 				http.Error(w, "session URL required: /whip/{sessionId}", http.StatusBadRequest)
 				return
 			}
-			handleWHIPDelete(w, rm, trimmed)
+			handleWHIPDelete(w, sm, trimmed)
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,7 +46,7 @@ func NewWHIPHandler(rm *room.Manager) http.HandlerFunc {
 
 // handleWHIPPost implements RFC 9725 §4.2 Ingest Session Setup.
 // A new sessionId (UUID) is generated for each POST.
-func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager) {
+func handleWHIPPost(w http.ResponseWriter, r *http.Request, sm *session.Manager) {
 	// RFC 9725 §4.2: MUST have content type application/sdp.
 	ct := r.Header.Get("Content-Type")
 	if ct != "" && !strings.HasPrefix(ct, "application/sdp") {
@@ -69,8 +69,8 @@ func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager) {
 	peerID := sessionID
 	log.Printf("[whip] creating session %s", sessionID)
 
-	session := rm.GetOrCreate(sessionID)
-	p, err := session.AddPeer(peerID)
+	ses := sm.GetOrCreate(sessionID)
+	p, err := ses.AddPeer(peerID)
 	if err != nil {
 		log.Printf("[whip] add peer error: %v", err)
 		http.Error(w, "failed to create peer", http.StatusInternalServerError)
@@ -99,13 +99,13 @@ func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager) {
 }
 
 // handleWHIPDelete implements RFC 9725 §4.2 session teardown.
-func handleWHIPDelete(w http.ResponseWriter, rm *room.Manager, sessionID string) {
+func handleWHIPDelete(w http.ResponseWriter, sm *session.Manager, sessionID string) {
 	log.Printf("[whip] DELETE session %s", sessionID)
 
 	// Idempotent: return 200 even if the session was already cleaned up by
 	// the server (e.g. WebRTC connection state changed to disconnected
 	// before the client's DELETE arrived).
-	rm.Remove(sessionID)
+	sm.Remove(sessionID)
 
 	w.WriteHeader(http.StatusOK)
 }

@@ -1,4 +1,4 @@
-package room
+package session
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/voiceagent/server/internal/pipeline"
 )
 
-type Room struct {
+type Session struct {
 	ID     string
 	cfg    *config.Config
 	ctx    context.Context
@@ -20,9 +20,9 @@ type Room struct {
 	peers map[string]*peer.Peer
 }
 
-func NewRoom(id string, cfg *config.Config) *Room {
+func NewSession(id string, cfg *config.Config) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Room{
+	return &Session{
 		ID:     id,
 		cfg:    cfg,
 		ctx:    ctx,
@@ -34,11 +34,11 @@ func NewRoom(id string, cfg *config.Config) *Room {
 // AddPeer creates a new Pion peer, wires up the audio pipeline, and starts
 // processing. Event messages (transcript, response) are delivered via the
 // peer's DataChannel.
-func (r *Room) AddPeer(peerID string) (*peer.Peer, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (s *Session) AddPeer(peerID string) (*peer.Peer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	p, err := peer.New(r.ctx, peerID)
+	p, err := peer.New(s.ctx, peerID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (r *Room) AddPeer(peerID string) (*peer.Peer, error) {
 		return p.SendEvent(msg)
 	}
 
-	pl, err := pipeline.New(r.ctx, r.cfg, sendMsg)
+	pl, err := pipeline.New(s.ctx, s.cfg, sendMsg)
 	if err != nil {
 		p.Close()
 		return nil, err
@@ -59,46 +59,46 @@ func (r *Room) AddPeer(peerID string) (*peer.Peer, error) {
 
 	p.OnClose = func() {
 		pl.Stop()
-		r.removePeer(peerID)
+		s.removePeer(peerID)
 	}
 
-	r.peers[peerID] = p
+	s.peers[peerID] = p
 
 	go func() {
 		if err := pl.Start(); err != nil {
-			log.Printf("[session:%s] pipeline error for peer %s: %v", r.ID, peerID, err)
+			log.Printf("[session:%s] pipeline error for peer %s: %v", s.ID, peerID, err)
 		}
 	}()
 
 	return p, nil
 }
 
-func (r *Room) GetPeer(peerID string) *peer.Peer {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.peers[peerID]
+func (s *Session) GetPeer(peerID string) *peer.Peer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peers[peerID]
 }
 
-func (r *Room) removePeer(peerID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.peers, peerID)
-	log.Printf("[session:%s] peer %s removed, %d peers remaining", r.ID, peerID, len(r.peers))
+func (s *Session) removePeer(peerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.peers, peerID)
+	log.Printf("[session:%s] peer %s removed, %d peers remaining", s.ID, peerID, len(s.peers))
 }
 
-func (r *Room) PeerCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.peers)
+func (s *Session) PeerCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.peers)
 }
 
-func (r *Room) Close() {
-	r.cancel()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, p := range r.peers {
+func (s *Session) Close() {
+	s.cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.peers {
 		p.Close()
 	}
-	r.peers = make(map[string]*peer.Peer)
-	log.Printf("[session:%s] closed", r.ID)
+	s.peers = make(map[string]*peer.Peer)
+	log.Printf("[session:%s] closed", s.ID)
 }

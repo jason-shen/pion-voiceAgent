@@ -190,23 +190,31 @@ The server reads env vars from `server/.env`. Create it from `server/.env.exampl
 voiceagent/
 ├── docker-compose.yml
 ├── server/                 # Go backend
+│   ├── .env.example        # Example environment config
 │   ├── Dockerfile
 │   ├── main.go
+│   ├── go.mod
+│   ├── go.sum
 │   └── internal/
-│       ├── config/         # Env config
-│       ├── signaling/      # WHIP HTTP signaling
-│       ├── room/           # Session manager, per-session peers
+│       ├── audio/          # Opus encode/decode, RTP, PCM
+│       ├── config/         # Environment configuration
+│       ├── events/         # Event types (reserved)
+│       ├── llm/            # OpenAI chat completions
 │       ├── peer/           # Pion WebRTC peer
 │       ├── pipeline/       # STT → LLM → TTS orchestration
+│       ├── session/        # Session manager, per-session peers
+│       ├── signaling/      # WHIP HTTP signaling (RFC 9725)
 │       ├── stt/            # Deepgram streaming STT
-│       ├── llm/            # OpenAI chat completions
-│       ├── tts/            # Cartesia + Deepgram TTS
-│       └── audio/          # Opus encode/decode, PCM
+│       └── tts/            # Cartesia + Deepgram TTS
 │
 ├── client/                 # Next.js frontend
+│   ├── .env.local.example  # Example client config
 │   ├── Dockerfile
+│   ├── package.json
+│   ├── next.config.ts
+│   ├── tsconfig.json
 │   └── src/
-│       ├── app/            # layout, page
+│       ├── app/            # Next.js app router (layout, page)
 │       ├── components/     # VoiceAgent, AudioVisualizer
 │       ├── hooks/          # useVoiceAgent
 │       └── lib/            # WHIP client
