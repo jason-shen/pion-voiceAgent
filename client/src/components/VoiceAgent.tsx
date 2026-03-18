@@ -29,7 +29,7 @@ function StatusBadge({ status }: { status: ConnectionStatus }) {
 
 function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
   return (
-    <div className="flex flex-col gap-3 overflow-y-auto max-h-[400px] pr-2 scrollbar-thin">
+    <div className="flex flex-col gap-3 overflow-y-auto max-h-[400px] no-scrollbar">
       {entries.length === 0 && (
         <p className="text-zinc-600 text-sm text-center py-8">
           Conversation will appear here...

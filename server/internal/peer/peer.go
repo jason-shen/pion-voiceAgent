@@ -14,9 +14,12 @@ import (
 	"github.com/voiceagent/server/internal/audio"
 )
 
+// DataChannel label that the client must create before making the offer.
+const EventChannelLabel = "events"
+
 type Peer struct {
-	ID string
-	pc *webrtc.PeerConnection
+	ID     string
+	pc     *webrtc.PeerConnection
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -24,8 +27,9 @@ type Peer struct {
 	decoder    *audio.OpusDecoder
 	encoder    *audio.OpusEncoder
 
-	sendMu  sync.Mutex
-	sendMsg func(interface{}) error
+	// DataChannel used to send transcript / response / error events to the client.
+	dcMu sync.Mutex
+	dc   *webrtc.DataChannel
 
 	OnAudioReceived func(pcm []int16)
 	OnTrackReady    func()
@@ -43,12 +47,7 @@ type Peer struct {
 	mu     sync.Mutex
 }
 
-type candidateMsg struct {
-	Type      string                   `json:"type"`
-	Candidate *webrtc.ICECandidateInit `json:"candidate"`
-}
-
-func New(ctx context.Context, id string, sendMsg func(interface{}) error) (*Peer, error) {
+func New(ctx context.Context, id string) (*Peer, error) {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -119,7 +118,6 @@ func New(ctx context.Context, id string, sendMsg func(interface{}) error) (*Peer
 		localTrack: track,
 		decoder:    dec,
 		encoder:    enc,
-		sendMsg:    sendMsg,
 		ssrc:       12345678,
 		markerNext: true,
 	}
@@ -132,17 +130,17 @@ func New(ctx context.Context, id string, sendMsg func(interface{}) error) (*Peer
 		go p.readTrack(remoteTrack)
 	})
 
-	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
+	// Accept the DataChannel created by the client for event messages.
+	pc.OnDataChannel(func(d *webrtc.DataChannel) {
+		if d.Label() != EventChannelLabel {
 			return
 		}
-		init := c.ToJSON()
-		msg := candidateMsg{Type: "candidate", Candidate: &init}
-		p.sendMu.Lock()
-		defer p.sendMu.Unlock()
-		if err := p.sendMsg(msg); err != nil {
-			log.Printf("[peer:%s] send ICE candidate error: %v", id, err)
-		}
+		d.OnOpen(func() {
+			log.Printf("[peer:%s] data channel '%s' open", id, d.Label())
+			p.dcMu.Lock()
+			p.dc = d
+			p.dcMu.Unlock()
+		})
 	})
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -155,6 +153,24 @@ func New(ctx context.Context, id string, sendMsg func(interface{}) error) (*Peer
 	})
 
 	return p, nil
+}
+
+// SendEvent JSON-encodes msg and sends it on the DataChannel.
+// Returns nil silently if the channel is not yet open.
+func (p *Peer) SendEvent(msg interface{}) error {
+	p.dcMu.Lock()
+	dc := p.dc
+	p.dcMu.Unlock()
+
+	if dc == nil {
+		return nil
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal event: %w", err)
+	}
+	return dc.SendText(string(data))
 }
 
 func (p *Peer) readTrack(track *webrtc.TrackRemote) {
@@ -271,14 +287,6 @@ func (p *Peer) HandleOffer(sdp string) (string, error) {
 	}
 
 	return p.pc.LocalDescription().SDP, nil
-}
-
-func (p *Peer) AddICECandidate(raw json.RawMessage) error {
-	var candidate webrtc.ICECandidateInit
-	if err := json.Unmarshal(raw, &candidate); err != nil {
-		return err
-	}
-	return p.pc.AddICECandidate(candidate)
 }
 
 func (p *Peer) Close() {

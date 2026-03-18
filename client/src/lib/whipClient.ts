@@ -1,0 +1,52 @@
+const WHIP_BASE_URL =
+  process.env.NEXT_PUBLIC_WHIP_URL ?? "http://localhost:8080/whip";
+
+export interface WHIPResult {
+  answerSDP: string;
+  sessionURL: string;
+}
+
+/**
+ * Perform a WHIP signaling exchange per RFC 9725 §4.2:
+ * POST an SDP offer, receive a 201 Created with SDP answer and Location header.
+ */
+export async function whipOffer(
+  room: string,
+  offerSDP: string
+): Promise<WHIPResult> {
+  const url = `${WHIP_BASE_URL}/${encodeURIComponent(room)}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp" },
+    body: offerSDP,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WHIP request failed (${res.status}): ${body}`);
+  }
+
+  const answerSDP = await res.text();
+
+  // RFC 9725 §4.2: Location header points to the WHIP session URL.
+  const location = res.headers.get("Location") ?? "";
+  const sessionURL = location.startsWith("http")
+    ? location
+    : `${new URL(url).origin}${location}`;
+
+  return { answerSDP, sessionURL };
+}
+
+/**
+ * Terminate a WHIP session per RFC 9725 §4.2:
+ * Send HTTP DELETE to the WHIP session URL.
+ */
+export async function whipDelete(sessionURL: string): Promise<void> {
+  if (!sessionURL) return;
+  try {
+    await fetch(sessionURL, { method: "DELETE" });
+  } catch {
+    // Best-effort teardown; connection may already be closed.
+  }
+}

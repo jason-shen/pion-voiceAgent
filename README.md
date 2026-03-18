@@ -1,6 +1,6 @@
 # Voice Agent
 
-A real-time AI voice agent built with WebRTC. Speak naturally in your browser—the agent transcribes your speech, runs it through an LLM, and speaks back with low-latency TTS, all over a peer-to-peer audio connection.
+A real-time AI voice agent built with WebRTC. Speak naturally in your browser—the agent transcribes your speech, runs it through an LLM, and speaks back with low-latency TTS, all over a peer-to-peer audio connection. Signaling follows the [WHIP standard (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html) — a single HTTP POST exchanges the SDP offer/answer with no persistent signaling connection required.
 
 ## Features
 
@@ -16,14 +16,14 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 | Component | Status | Notes |
 |-----------|--------|-------|
 | WebRTC audio (Pion) | ✅ | Opus RTP bidirectional streaming |
-| WebSocket signaling | ✅ | SDP offer/answer, ICE candidates |
+| WHIP signaling | ✅ | Single HTTP POST, full ICE gathering |
+| DataChannel events | ✅ | Transcript & response messages over DC |
 | Room management | ✅ | Create/join rooms, goroutine per room |
 | Deepgram STT | ✅ | Streaming WebSocket, Nova-2, endpointing |
 | OpenAI LLM | ✅ | GPT-4o-mini, streaming, conversation history |
 | Cartesia TTS | ✅ | Sonic-3, Katie voice, pcm_s16le |
 | Deepgram TTS | ✅ | Aura Asteria, switchable via env |
 | Next.js client | ✅ | Room join, live transcript, audio visualizer |
-| ICE candidate buffering | ✅ | Handles out-of-order signaling |
 
 ## TODO
 
@@ -40,12 +40,15 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 │  Mic → WebRTC ──────┼──── Opus RTP ──────┼──→ Opus Decode → Deepgram STT        │
 │  Speaker ← WebRTC ←─┼──── Opus RTP ←─────┼──← Opus Encode ← TTS (Cartesia/DG)    │
 │                     │                    │         │                            │
-│  WebSocket ◄───────►│◄──────────────────►│  OpenAI GPT (streaming)               │
-│  (signaling)        │                    │         │                            │
+│  HTTP POST ─────────┼── WHIP (SDP) ──────┼──→ Peer created, answer returned       │
+│  DataChannel ◄──────┼──── transcript ←───┼──← OpenAI GPT (streaming)              │
+│                     │                    │                                       │
 └─────────────────────┘                    └─────────────────────────────────────┘
 ```
 
-**Pipeline flow:** Browser captures mic → Opus over WebRTC → Server decodes to PCM → Deepgram STT → OpenAI LLM → Cartesia/Deepgram TTS → Opus over WebRTC → Browser plays audio.
+**Signaling:** Client creates a DataChannel + SDP offer (with all ICE candidates gathered), POSTs it to `/whip/{room}`, and receives the SDP answer. No persistent signaling connection needed.
+
+**Pipeline flow:** Browser captures mic → Opus over WebRTC → Server decodes to PCM → Deepgram STT → OpenAI LLM → Cartesia/Deepgram TTS → Opus over WebRTC → Browser plays audio. Transcript and response text are delivered back to the client via a WebRTC DataChannel.
 
 ## Prerequisites
 
@@ -80,9 +83,9 @@ docker compose up --build
 
 **3. Open [http://localhost:3000](http://localhost:3000)** — enter a room name and click Connect.
 
-> **Note:** The client connects to `ws://localhost:8080/ws` by default. If you access the app via a different host (e.g. `http://192.168.1.x:3000`), rebuild the client with:
+> **Note:** The client connects to `http://localhost:8080/whip` by default. If you access the app via a different host (e.g. `http://192.168.1.x:3000`), rebuild the client with:
 > ```bash
-> docker compose build --build-arg NEXT_PUBLIC_SIGNALING_URL=ws://YOUR_HOST:8080/ws client
+> docker compose build --build-arg NEXT_PUBLIC_WHIP_URL=http://YOUR_HOST:8080/whip client
 > docker compose up
 > ```
 
@@ -124,28 +127,51 @@ npm run dev
 | `TTS_PROVIDER` | No | `cartesia` | `cartesia` or `deepgram` |
 | `CARTESIA_API_KEY` | If Cartesia | — | [Cartesia](https://cartesia.ai) API key |
 | `CARTESIA_VOICE_ID` | No | Katie | Voice ID (see [Cartesia docs](https://docs.cartesia.ai)) |
-| `PORT` | No | `8080` | HTTP/WebSocket port |
+| `PORT` | No | `8080` | HTTP server port |
 | `SYSTEM_PROMPT` | No | (helpful assistant) | System prompt for the agent |
 
 ### Client (`client/.env.local`)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|--------------|
-| `NEXT_PUBLIC_SIGNALING_URL` | No | `ws://localhost:8080/ws` | WebSocket signaling URL |
+| `NEXT_PUBLIC_WHIP_URL` | No | `http://localhost:8080/whip` | WHIP signaling endpoint |
 
-## Signaling Protocol
+## Signaling Protocol (WHIP — RFC 9725)
 
-WebSocket messages at `/ws`:
+Signaling follows [RFC 9725](https://www.rfc-editor.org/rfc/rfc9725.html) (WebRTC-HTTP Ingestion Protocol).
 
-| Direction | Type | Payload |
-|-----------|------|---------|
-| Client → Server | `join` | `{ room: string }` |
-| Server → Client | `joined` | `{ peer_id: string }` |
-| Client → Server | `offer` | `{ sdp: string }` |
-| Server → Client | `answer` | `{ sdp: string }` |
-| Both | `candidate` | `{ candidate: RTCIceCandidateInit }` |
-| Server → Client | `transcript` | `{ text: string, final: boolean }` |
-| Server → Client | `response` | `{ text: string }` |
+### HTTP — SDP Exchange
+
+| Step | Method | Path | Body | Response |
+|------|--------|------|------|----------|
+| 1 | `POST` | `/whip/{room}` | SDP offer (`application/sdp`) | `201 Created` with SDP answer, `Location` header, `ETag` header |
+| 2 | `DELETE` | `/whip/{room}/{peerID}` | — | `200 OK` (session terminated) |
+| — | `OPTIONS` | `/whip/*` | — | `204` with `Accept-Post: application/sdp` |
+
+The client gathers all ICE candidates before sending the offer. The server gathers all ICE candidates before returning the answer. No trickle ICE.
+
+### DataChannel — Event Messages
+
+The client creates a DataChannel labelled `"events"` before generating the offer. Once the WebRTC connection is established, the server sends JSON text messages on it:
+
+| Type | Payload | Description |
+|------|---------|-------------|
+| `transcript` | `{ text: string, final: boolean }` | User speech transcription (partial + final) |
+| `response` | `{ text: string }` | LLM response chunks (streamed) |
+| `error` | `{ message: string }` | Server-side errors |
+
+### RFC 9725 Compliance
+
+This implementation follows and aligns with [RFC 9725](https://www.rfc-editor.org/rfc/rfc9725.html):
+
+- ✅ `POST` with `application/sdp` offer → `201 Created` with SDP answer (§4.2)
+- ✅ `Location` header pointing to WHIP session URL (§4.2)
+- ✅ `ETag` header identifying the ICE session (§4.3.1)
+- ✅ `DELETE` on session URL for teardown (§4.2)
+- ✅ `OPTIONS` with `Accept-Post: application/sdp` for CORS (§4.2)
+- ✅ Full ICE gathering (no trickle ICE) on both client and server (§4.3.2)
+
+**Bidirectional extensions:** WHIP was designed for unidirectional ingestion. This project extends it for bidirectional voice by using `sendrecv` (allowed per §4.2: client "MAY use sendrecv") and adding a DataChannel for server→client event delivery.
 
 ## Docker
 
@@ -167,7 +193,7 @@ voiceagent/
 │   ├── main.go
 │   └── internal/
 │       ├── config/         # Env config
-│       ├── signaling/      # WebSocket SDP/ICE exchange
+│       ├── signaling/      # WHIP HTTP signaling
 │       ├── room/           # Room manager, per-room peers
 │       ├── peer/           # Pion WebRTC peer
 │       ├── pipeline/       # STT → LLM → TTS orchestration
@@ -182,7 +208,7 @@ voiceagent/
 │       ├── app/            # layout, page
 │       ├── components/     # VoiceAgent, AudioVisualizer
 │       ├── hooks/          # useVoiceAgent
-│       └── lib/            # SignalingClient
+│       └── lib/            # WHIP client
 │
 └── README.md
 ```

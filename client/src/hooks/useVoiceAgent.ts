@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { SignalingClient, type SignalingMessage } from "../lib/signaling";
+import { whipOffer, whipDelete } from "../lib/whipClient";
 
 export type ConnectionStatus =
   | "idle"
@@ -26,8 +26,10 @@ export interface UseVoiceAgentReturn {
   toggleMute: () => void;
 }
 
-const SIGNALING_URL =
-  process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://localhost:8080/ws";
+type DataChannelMessage =
+  | { type: "transcript"; text: string; final: boolean }
+  | { type: "response"; text: string }
+  | { type: "error"; message: string };
 
 export function useVoiceAgent(): UseVoiceAgentReturn {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
@@ -35,8 +37,8 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
   const [audioLevel, setAudioLevel] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
 
-  const signalingRef = useRef<SignalingClient | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const sessionURLRef = useRef<string>("");
   const streamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -76,48 +78,28 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
     tick();
   }, []);
 
-  const handleSignalingMessage = useCallback(
-    (
-      msg: SignalingMessage,
-      pc: RTCPeerConnection,
-      pendingCandidates: RTCIceCandidateInit[]
-    ) => {
+  const handleDataChannelMessage = useCallback(
+    (msg: DataChannelMessage) => {
       switch (msg.type) {
-        case "answer": {
-          const desc = new RTCSessionDescription({
-            type: "answer",
-            sdp: msg.sdp,
-          });
-          pc.setRemoteDescription(desc)
-            .then(() =>
-              Promise.all(
-                pendingCandidates.map((c) =>
-                  pc.addIceCandidate(new RTCIceCandidate(c))
-                )
-              )
-            )
-            .then(() => pendingCandidates.splice(0))
-            .catch(console.error);
-          break;
-        }
-        case "candidate": {
-          if ("candidate" in msg && msg.candidate) {
-            if (pc.remoteDescription) {
-              pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(
-                console.error
-              );
-            } else {
-              pendingCandidates.push(msg.candidate);
-            }
-          }
-          break;
-        }
         case "transcript": {
           if (msg.final) {
+            // Finalize assistant buffer first so the thread stays in order:
+            // user → agent → user → agent
+            const pendingAssistant = assistantBufRef.current;
+            assistantBufRef.current = "";
+
             setTranscript((prev) => {
-              const updated = prev.filter(
-                (e) => !(e.role === "user" && e.partial)
+              let updated = prev.filter(
+                (e) =>
+                  !(e.role === "user" && e.partial) &&
+                  !(e.role === "assistant" && e.partial)
               );
+              if (pendingAssistant) {
+                updated = [
+                  ...updated,
+                  { role: "assistant" as const, text: pendingAssistant },
+                ];
+              }
               return [...updated, { role: "user", text: msg.text }];
             });
           } else {
@@ -163,26 +145,21 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
         setTranscript([]);
         assistantBufRef.current = "";
 
-        const signaling = new SignalingClient(SIGNALING_URL);
-        signalingRef.current = signaling;
-        await signaling.connect();
-
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
         pcRef.current = pc;
 
-        const pendingCandidates: RTCIceCandidateInit[] = [];
-        const unsubscribe = signaling.onMessage((msg) =>
-          handleSignalingMessage(msg, pc, pendingCandidates)
-        );
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            signaling.send({
-              type: "candidate",
-              candidate: e.candidate.toJSON(),
-            });
+        // Create a DataChannel for receiving events (transcript, response)
+        // from the server. Must be created before the offer so it is
+        // included in the SDP.
+        const dc = pc.createDataChannel("events");
+        dc.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data) as DataChannelMessage;
+            handleDataChannelMessage(msg);
+          } catch {
+            console.error("[voiceagent] failed to parse DC message", e.data);
           }
         };
 
@@ -226,45 +203,44 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
         startAudioLevelMonitoring(stream);
 
-        signaling.send({ type: "join", room });
-
-        await new Promise<void>((resolve) => {
-          const unsub = signaling.onMessage((msg) => {
-            if (msg.type === "joined") {
-              unsub();
-              resolve();
-            }
-          });
-        });
-
+        // Create offer and gather all ICE candidates before sending.
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        signaling.send({ type: "offer", sdp: offer.sdp! });
 
-        signaling.onMessage((msg) => {
-          if (
-            msg.type === "transcript" &&
-            msg.final &&
-            assistantBufRef.current
-          ) {
-            const finalText = assistantBufRef.current;
-            assistantBufRef.current = "";
-            setTranscript((prev) => {
-              const updated = prev.filter(
-                (e) => !(e.role === "assistant" && e.partial)
-              );
-              return [...updated, { role: "assistant", text: finalText }];
-            });
+        // Wait for ICE gathering to complete so the offer contains all candidates.
+        await new Promise<void>((resolve) => {
+          if (pc.iceGatheringState === "complete") {
+            resolve();
+            return;
           }
+          const onGatherChange = () => {
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener(
+                "icegatheringstatechange",
+                onGatherChange
+              );
+              resolve();
+            }
+          };
+          pc.addEventListener("icegatheringstatechange", onGatherChange);
         });
 
-        pc.addEventListener("close", () => unsubscribe());
+        // WHIP exchange: POST offer SDP, receive answer SDP + session URL.
+        const { answerSDP, sessionURL } = await whipOffer(
+          room,
+          pc.localDescription!.sdp
+        );
+        sessionURLRef.current = sessionURL;
+
+        await pc.setRemoteDescription(
+          new RTCSessionDescription({ type: "answer", sdp: answerSDP })
+        );
       } catch (err) {
         console.error("[voiceagent] connect error:", err);
         setStatus("error");
       }
     },
-    [handleSignalingMessage, startAudioLevelMonitoring, cleanupAudioLevel]
+    [handleDataChannelMessage, startAudioLevelMonitoring, cleanupAudioLevel]
   );
 
   const disconnect = useCallback(() => {
@@ -280,10 +256,12 @@ export function useVoiceAgent(): UseVoiceAgentReturn {
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
 
+    // RFC 9725 §4.2: DELETE the WHIP session to free server resources.
+    whipDelete(sessionURLRef.current);
+    sessionURLRef.current = "";
+
     pcRef.current?.close();
     pcRef.current = null;
-    signalingRef.current?.close();
-    signalingRef.current = null;
     setStatus("idle");
     assistantBufRef.current = "";
   }, [cleanupAudioLevel]);
