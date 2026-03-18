@@ -30,6 +30,8 @@ A real-time AI voice agent built with WebRTC. Speak naturally in your browser—
 - [ ] **Tool calling** — LLM function/tool execution (APIs, actions)
 - [ ] **RAG** — Retrieval-augmented generation (documents, knowledge base)
 - [ ] **Memory** — Persistent conversation memory across sessions
+- [ ] **Sip connection** connect to the agent with sip client
+- [ ] **Client SDK** create a client sdk for the agent
 
 ## Architecture
 
