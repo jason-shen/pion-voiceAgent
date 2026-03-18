@@ -14,7 +14,7 @@ services:
       context: ./client
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_SIGNALING_URL: "ws://localhost:8080/ws"
+        NEXT_PUBLIC_WHIP_URL: "http://localhost:8080/whip"
     ports:
       - "3000:3000"
     depends_on:

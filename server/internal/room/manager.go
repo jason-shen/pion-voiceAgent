@@ -34,6 +34,12 @@ func (m *Manager) GetOrCreate(roomID string) *Room {
 	return r
 }
 
+func (m *Manager) Get(roomID string) *Room {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.rooms[roomID]
+}
+
 func (m *Manager) Remove(roomID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

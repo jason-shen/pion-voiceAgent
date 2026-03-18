@@ -5,7 +5,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/voiceagent/server/internal/config"
 	"github.com/voiceagent/server/internal/peer"
 	"github.com/voiceagent/server/internal/pipeline"
@@ -32,22 +31,20 @@ func NewRoom(id string, cfg *config.Config) *Room {
 	}
 }
 
-// AddPeer creates a new Pion peer for the given WebSocket connection,
-// wires up the audio pipeline, and starts processing.
-func (r *Room) AddPeer(peerID string, ws *websocket.Conn) (*peer.Peer, error) {
+// AddPeer creates a new Pion peer, wires up the audio pipeline, and starts
+// processing. Event messages (transcript, response) are delivered via the
+// peer's DataChannel.
+func (r *Room) AddPeer(peerID string) (*peer.Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var wsMu sync.Mutex
-	sendMsg := func(msg interface{}) error {
-		wsMu.Lock()
-		defer wsMu.Unlock()
-		return ws.WriteJSON(msg)
-	}
-
-	p, err := peer.New(r.ctx, peerID, sendMsg)
+	p, err := peer.New(r.ctx, peerID)
 	if err != nil {
 		return nil, err
+	}
+
+	sendMsg := func(msg interface{}) error {
+		return p.SendEvent(msg)
 	}
 
 	pl, err := pipeline.New(r.ctx, r.cfg, sendMsg)
@@ -74,6 +71,12 @@ func (r *Room) AddPeer(peerID string, ws *websocket.Conn) (*peer.Peer, error) {
 	}()
 
 	return p, nil
+}
+
+func (r *Room) GetPeer(peerID string) *peer.Peer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peers[peerID]
 }
 
 func (r *Room) removePeer(peerID string) {
