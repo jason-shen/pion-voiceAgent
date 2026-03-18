@@ -11,7 +11,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/voiceagent/server/internal/config"
-	"github.com/voiceagent/server/internal/room"
+	"github.com/voiceagent/server/internal/session"
 	"github.com/voiceagent/server/internal/signaling"
 	"github.com/voiceagent/server/internal/tts"
 )
@@ -30,11 +30,11 @@ func main() {
 		log.Fatalf("TTS config: %v (set TTS_PROVIDER=cartesia with CARTESIA_API_KEY, or TTS_PROVIDER=deepgram)", err)
 	}
 
-	rm := room.NewManager(cfg)
+	sm := session.NewManager(cfg)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/whip", signaling.NewWHIPHandler(rm))
-	mux.HandleFunc("/whip/", signaling.NewWHIPHandler(rm))
+	mux.HandleFunc("/whip", signaling.NewWHIPHandler(sm))
+	mux.HandleFunc("/whip/", signaling.NewWHIPHandler(sm))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -63,7 +63,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	rm.CloseAll()
+	sm.CloseAll()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("shutdown error: %v", err)
