@@ -104,19 +104,17 @@ func handleWHIPPost(w http.ResponseWriter, r *http.Request, rm *room.Manager, ro
 
 // handleWHIPDelete implements RFC 9725 §4.2 session teardown.
 func handleWHIPDelete(w http.ResponseWriter, rm *room.Manager, roomName, peerID string) {
-	r := rm.Get(roomName)
-	if r == nil {
-		http.Error(w, "room not found", http.StatusNotFound)
-		return
-	}
-
-	p := r.GetPeer(peerID)
-	if p == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
 	log.Printf("[whip] DELETE session %s/%s", roomName, peerID)
-	p.Close()
+
+	// Idempotent: return 200 even if the peer was already cleaned up by the
+	// server (e.g. WebRTC connection state changed to disconnected before
+	// the client's DELETE arrived).
+	r := rm.Get(roomName)
+	if r != nil {
+		if p := r.GetPeer(peerID); p != nil {
+			p.Close()
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }

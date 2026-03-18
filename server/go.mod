@@ -1,8 +1,11 @@
 module github.com/voiceagent/server
 
-go 1.22
+go 1.22.0
+
+toolchain go1.24.1
 
 require (
+	github.com/godeps/opus v1.0.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
@@ -10,7 +13,6 @@ require (
 	github.com/pion/rtp v1.8.9
 	github.com/pion/webrtc/v4 v4.0.5
 	github.com/sashabaranov/go-openai v1.36.1
-	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
 
 require (
@@ -27,6 +29,7 @@ require (
 	github.com/pion/stun/v3 v3.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pion/turn/v4 v4.0.0 // indirect
+	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.29.0 // indirect
 	golang.org/x/net v0.31.0 // indirect
